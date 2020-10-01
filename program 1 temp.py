@@ -1,39 +1,86 @@
 #!/usr/bin/python3
-import RPi.GPIO as GPIO  
-import math, sys, os
+import gpiozero		#gpio module
+import math, sys, os, time
 import subprocess
 import socket
 
-GPIO.setwarnings(False)
-GPIO.setmode(GPIO.BCM)  
-GPIO.setup(18, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(23, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+pin_rotaryenable = 26	# yellow
+pin_countrotary = 19		# red
+pin_hook = 16
+button_hook = 12
 
-c=0
-last = 1
+rotaryenable = gpiozero.Button(pin_rotaryenable)
+countrotary = gpiozero.Button(pin_countrotary)
+hook = gpiozero.Button(pin_hook)
+button = gpiozero.Button(button_hook)
 
-def count(pin):
-    global c 
-    c = c + 1
+class Dial():
+	def __init__(self):
+		print("Initializing...")
+		self.pulses = 0
+		self.number = ""
+		self.counting = True
+		self.calling = False
 
-GPIO.add_event_detect(18, GPIO.BOTH)
+	def startcalling(self):
+		print("Start calling")
+		self.reset()
+		self.calling = True
+		self.player = subprocess.Popen(["mpg123", "--loop", "20", "-q", "dial.mp3"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-while True:
-    try:
-        if GPIO.event_detected(18):
-            current = GPIO.input(18)
-            if(last != current):
-                if(current == 0):
-                    GPIO.add_event_detect(23, GPIO.BOTH, callback=count, bouncetime=10)
-                else:
-                    GPIO.remove_event_detect(23)
-                    number = int((c-1)/2)
-		                       
-                    print ("You dial", number)
+	def stopcalling(self):
+		print("Stop calling")
+		self.calling = False
+		self.reset()
 
-                    c= 0                 
-                    
-                    
-                last = GPIO.input(18)
-    except KeyboardInterrupt:
-        break
+	def startcounting(self):
+		print ("Start counting")
+		self.counting = self.calling
+
+	def stopcounting(self):
+		print("Stop counting")
+		if self.calling:
+			print ("Got %s pulses.." % self.pulses)
+			if self.pulses > 0:
+				if math.floor(self.pulses / 2) == 10:
+					self.number += "0"
+				else:
+					short_num = str(math.floor(self.pulses/2))
+					self.number += short_num
+			print("Than %s is dialed!" % self.number)
+			self.pulses = 0
+		self.counting = False
+
+	def addpulse(self):
+		print("Add pulse")
+		if self.counting:
+			print("real addpulse")
+			self.pulses += 1
+
+	def getnumber(self):
+		return self.number
+
+	def counterreset(self):
+		print("Reset counter")
+		self.pulses = 0
+		self.number = ""
+		
+	def reset(self):
+		print("Reset all")
+		self.counterreset()
+		try:
+			self.player.kill()
+		except:
+			pass
+
+
+if __name__ == "__main__":
+	dial = Dial()
+	countrotary.when_deactivated = dial.addpulse
+	countrotary.when_activated = dial.addpulse
+	rotaryenable.when_activated = dial.startcounting
+	rotaryenable.when_deactivated = dial.stopcounting
+	hook.when_activated = dial.stopcalling
+	hook.when_deactivated = dial.startcalling
+	while True:
+		time.sleep(1)
